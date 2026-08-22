@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Respostas — Sondagem</title>
+  <link rel="stylesheet" href="assets/css/tailwind.css" />
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/format.js"></script>
+  <script src="assets/js/query.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/sv.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/i18n.js"></script>
+</head>
+<body data-shell="app">
+  <div id="app"><div id="page"></div></div>
+
+  <script>
+    // Porta a ResultsPage do React: resumo com um gráfico por tipo de pergunta,
+    // respostas individuais em tabela + gaveta e exportação em CSV de verdade.
+    const PAGE_SIZE = 10;
+    const SOURCES = ['link', 'email', 'qr', 'incorporado'];
+
+    const surveyId = Number(new URLSearchParams(window.location.search).get('id'));
+    let tab = 0;
+    let page = 1;
+    let source = 'all';
+    let completed = 'all';
+    let term = '';
+
+    function surveyOf() {
+      return SV.get().surveys.find((s) => s.id === surveyId);
+    }
+
+    function filteredRows(survey) {
+      const st = SV.get();
+      const rows = Query.responsesOf(st.responses, survey.id);
+      const needle = term.trim().toLowerCase();
+      return rows
+        .filter((r) => (source === 'all' ? true : r.source === source))
+        .filter((r) => (completed === 'all' ? true : completed === 'yes' ? r.completed : !r.completed))
+        .filter((r) => {
+          if (!needle) return true;
+          const contact = Query.contactById(st.contacts, r.contactId);
+          const haystack = [contact ? contact.name : '', contact ? contact.email : '']
+            .concat(r.answers.map((a) => Query.answerToText(a.value)))
+            .join(' ')
+            .toLowerCase();
+          return haystack.includes(needle);
+        })
+        .sort((a, b) => b.at.localeCompare(a.at));
+    }
+
+    function summaryTabHtml(survey, responses) {
+      const t = UI.t;
+      if (responses.length === 0) {
+        return '<div class="surface-card rounded-2xl border">' +
+          UI.emptyState({ icon: 'inbox', title: t('results.emptyTitle'), description: t('results.emptyDesc') }) + '</div>';
+      }
+      return '<div class="flex flex-col gap-5">' +
+        Query.summarizeSurvey(survey, responses)
+          .map((summary, index) => UI.questionSummaryCard(summary, index, survey.color))
+          .join('') +
+        '</div>';
+    }
+
+    function listTabHtml(survey) {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      const st = SV.get();
+      const rows = filteredRows(survey);
+      const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+      if (page > totalPages) page = totalPages;
+      const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+      const filters = UI.filterBar({
+        search: true,
+        searchValue: term,
+        searchPlaceholder: t('results.searchPlaceholder'),
+        children:
+          UI.filterSelect({
+            name: 'source',
+            label: t('results.source'),
+            value: source,
+            options: [{ value: 'all', label: t('common.all') }].concat(
+              SOURCES.map((s) => ({ value: s, label: t('sources.' + s) }))
+            ),
+          }) +
+          UI.filterSelect({
+            name: 'completed',
+            label: t('results.status'),
+            value: completed,
+            options: [
+              { value: 'all', label: t('common.all') },
+              { value: 'yes', label: t('results.completed') },
+              { value: 'no', label: t('results.partial') },
+            ],
+          }),
+      });
+
+      if (rows.length === 0) {
+        return filters +
+          '<div class="surface-card rounded-2xl border">' +
+          UI.emptyState({
+            icon: 'inbox',
+            title: t('results.emptyFilterTitle'),
+            description: t('results.emptyFilterDesc'),
+            action: '<button type="button" data-clear class="inline-flex h-10 items-center rounded-lg border border-themed px-4 text-sm font-medium text-body">' +
+              t('common.clearFilters') + '</button>',
+          }) +
+          '</div>';
+      }
+
+      return filters +
+        '<div class="surface-card overflow-hidden rounded-2xl border"><div class="overflow-x-auto">' +
+        '<table class="w-full min-w-[48rem] text-left text-sm"><thead><tr class="border-b border-themed">' +
+        '<th class="px-5 py-3 font-medium text-muted">#</th>' +
+        '<th class="px-5 py-3 font-medium text-muted">' + t('results.respondent') + '</th>' +
+        '<th class="px-5 py-3 font-medium text-muted">' + t('results.date') + '</th>' +
+        '<th class="px-5 py-3 font-medium text-muted">' + t('results.source') + '</th>' +
+        '<th class="px-5 py-3 text-right font-medium text-muted">' + t('results.duration') + '</th>' +
+        '<th class="px-5 py-3 font-medium text-muted">' + t('results.status') + '</th>' +
+        '<th class="px-5 py-3 text-right font-medium text-muted">' + t('common.actions') + '</th></tr></thead><tbody>' +
+        pageRows.map((response) => {
+          const contact = Query.contactById(st.contacts, response.contactId);
+          return '<tr class="border-b border-themed last:border-0 hover:bg-gray-50 dark:hover:bg-white/5">' +
+            '<td class="px-5 py-3 tabular-nums text-muted">' + response.id + '</td>' +
+            '<td class="max-w-[16rem] px-5 py-3"><div class="flex min-w-0 items-center gap-2.5">' +
+            (contact
+              ? UI.avatar({ src: contact.avatar, name: contact.name, size: 'xs' }) +
+                '<span class="min-w-0"><span class="block truncate text-sm text-heading">' + esc(contact.name) + '</span>' +
+                '<span class="block truncate text-xs text-muted">' + esc(contact.email) + '</span></span>'
+              : '<span class="text-muted">' + t('results.anonymous') + '</span>') +
+            '</div></td>' +
+            '<td class="px-5 py-3 text-muted">' + UI.fmtDateTime(response.at) + '</td>' +
+            '<td class="px-5 py-3">' + UI.sourceBadge(response.source) + '</td>' +
+            '<td class="px-5 py-3 text-right tabular-nums text-body">' + Query.formatSeconds(response.durationSec) + '</td>' +
+            '<td class="px-5 py-3">' +
+            UI.badge(t(response.completed ? 'results.completed' : 'results.partial'), response.completed ? 'success' : 'warning', { dot: true }) +
+            '</td>' +
+            '<td class="px-5 py-3 text-right">' +
+            '<button type="button" data-view="' + response.id + '" class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-themed px-3 text-xs font-medium text-body transition hover:bg-gray-50 dark:hover:bg-gray-800">' +
+            icon('eye', { size: 14 }) + t('results.view') + '</button></td></tr>';
+        }).join('') +
+        '</tbody></table></div></div>' +
+        '<div class="mt-5">' + UI.pagination(page, totalPages) + '</div>';
+    }
+
+    function renderTab() {
+      const survey = surveyOf();
+      const panel = document.querySelector('[data-tab-panel]');
+      if (!survey || !panel) return;
+      const responses = Query.responsesOf(SV.get().responses, survey.id);
+
+      panel.innerHTML = tab === 0 ? summaryTabHtml(survey, responses) : listTabHtml(survey);
+
+      document.querySelectorAll('[data-tabs] [data-tab]').forEach((btn, i) => {
+        const active = i === tab;
+        btn.setAttribute('aria-selected', String(active));
+        btn.className =
+          '-mb-px inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ' +
+          (active
+            ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+            : 'border-transparent text-muted hover:border-gray-300 hover:text-body dark:hover:border-gray-700');
+      });
+
+      if (tab !== 1) return;
+
+      const search = panel.querySelector('[data-filter-search]');
+      if (search) {
+        search.addEventListener('input', () => {
+          term = search.value;
+          page = 1;
+          renderTab();
+          const again = document.querySelector('[data-filter-search]');
+          again.focus();
+          again.setSelectionRange(again.value.length, again.value.length);
+        });
+      }
+      const sourceSel = panel.querySelector('[data-filter="source"]');
+      if (sourceSel) sourceSel.addEventListener('change', (e) => { source = e.target.value; page = 1; renderTab(); });
+      const statusSel = panel.querySelector('[data-filter="completed"]');
+      if (statusSel) statusSel.addEventListener('change', (e) => { completed = e.target.value; page = 1; renderTab(); });
+      const clear = panel.querySelector('[data-clear]');
+      if (clear) clear.addEventListener('click', () => { term = ''; source = 'all'; completed = 'all'; page = 1; renderTab(); });
+
+      panel.querySelectorAll('[data-view]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          const st = SV.get();
+          const response = st.responses.find((r) => r.id === Number(btn.getAttribute('data-view')));
+          if (!response) return;
+          const drawerEl = document.getElementById('response-drawer');
+          drawerEl.querySelector('[data-drawer-title]').textContent = UI.t('results.responseTitle', { id: response.id });
+          drawerEl.querySelector('[data-drawer-subtitle]').textContent = UI.fmtDateTime(response.at);
+          drawerEl.querySelector('[data-drawer-body]').innerHTML = UI.responseDetail(surveyOf(), response, st.contacts);
+          UI.openDrawer('response-drawer');
+        })
+      );
+    }
+
+    window.onTabChange = function (index) {
+      tab = index;
+      renderTab();
+    };
+    window.onPageChange = function (next) {
+      page = next;
+      renderTab();
+    };
+
+    window.renderPage = function () {
+      const t = UI.t, icon = UI.icon;
+      const el = document.getElementById('page');
+      const survey = surveyOf();
+
+      if (!survey) {
+        document.title = t('builder.notFoundTitle') + ' · ' + t('brand');
+        el.innerHTML = UI.emptyState({
+          icon: 'chart',
+          title: t('builder.notFoundTitle'),
+          description: t('builder.notFoundDesc'),
+          action: '<a href="app-formularios.html" class="inline-flex h-10 items-center rounded-lg bg-brand-500 px-4 text-sm font-medium text-white">' +
+            t('builder.backToForms') + '</a>',
+        });
+        return;
+      }
+
+      document.title = survey.title + ' — ' + t('results.title') + ' · ' + t('brand') + ' — Pesquisas & Formulários';
+
+      const responses = Query.responsesOf(SV.get().responses, survey.id);
+      const nps = Query.surveyNps(survey, responses);
+
+      const header = UI.pageHeader({
+        title: t('results.title'),
+        subtitle: survey.title,
+        crumbs: [
+          { label: t('appNav.forms'), href: 'app-formularios.html', icon: 'clipboard-list' },
+          { label: survey.title, href: 'app-construtor.html?id=' + survey.id },
+          { label: t('results.title') },
+        ],
+        action:
+          '<div class="flex flex-wrap items-center gap-2">' +
+          '<a href="app-construtor.html?id=' + survey.id +
+          '" class="inline-flex h-10 items-center gap-2 rounded-lg border border-themed px-4 text-sm font-medium text-body transition hover:bg-gray-50 dark:hover:bg-gray-800">' +
+          icon('edit', { size: 16 }) + t('forms.edit') + '</a>' +
+          '<button type="button" data-export class="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50">' +
+          icon('download', { size: 16 }) + t('results.export') + '</button></div>',
+      });
+
+      const kpis =
+        '<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">' +
+        UI.kpiCard({ title: t('results.kpi.total'), value: responses.length, icon: 'inbox', accent: 'brand', hint: t('results.kpi.totalHint', { views: survey.views }) }) +
+        UI.kpiCard({
+          title: t('results.kpi.completion'),
+          value: Math.round(Query.completionRate(responses) * 100) + '%',
+          icon: 'check-circle',
+          accent: 'success',
+          hint: t('results.kpi.completionHint', { count: responses.filter((r) => r.completed).length }),
+        }) +
+        UI.kpiCard({
+          title: t('results.kpi.time'),
+          value: responses.length ? Query.formatSeconds(Query.averageSeconds(responses)) : '—',
+          icon: 'clock',
+          accent: 'warning',
+          hint: t('results.kpi.timeHint'),
+        }) +
+        UI.kpiCard({
+          title: t('results.kpi.nps'),
+          value: nps ? nps.score : '—',
+          icon: 'gauge',
+          accent: 'info',
+          hint: nps ? t('results.kpi.npsHint', { count: nps.total }) : t('results.kpi.npsNone'),
+        }) +
+        '</div>';
+
+      el.innerHTML =
+        header + kpis +
+        '<div class="mt-6">' +
+        UI.tabs(
+          [
+            { label: t('results.tabs.summary'), icon: 'pie-chart', content: '' },
+            { label: t('results.tabs.individual'), icon: 'list', content: '' },
+          ],
+          tab
+        ) +
+        '</div>' +
+        UI.drawer('response-drawer', { width: 'max-w-xl' });
+
+      const exportBtn = el.querySelector('[data-export]');
+      exportBtn.disabled = filteredRows(survey).length === 0;
+      exportBtn.addEventListener('click', () => {
+        const rows = filteredRows(survey);
+        if (rows.length === 0) return;
+        const csv = Query.buildCsv(
+          survey,
+          rows,
+          SV.get().contacts,
+          {
+            id: t('results.csv.id'),
+            at: t('results.csv.at'),
+            duration: t('results.csv.duration'),
+            completed: t('results.csv.completed'),
+            source: t('results.csv.source'),
+            contact: t('results.csv.contact'),
+          },
+          t('common.yes'),
+          t('common.no')
+        );
+        Query.downloadCsv(survey.slug + '-respostas.csv', csv);
+        UI.notify(t('results.exported', { count: rows.length }), 'success');
+      });
+
+      renderTab();
+    };
+  </script>
+  <script src="assets/js/layout.js"></script>
+</body>
+</html>

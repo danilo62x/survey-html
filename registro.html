@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Criar conta — Sondagem</title>
+  <link rel="stylesheet" href="assets/css/tailwind.css" />
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/format.js"></script>
+  <script src="assets/js/query.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/sv.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/i18n.js"></script>
+</head>
+<body data-shell="blank">
+  <div id="app"><div id="page"></div></div>
+
+  <script>
+    // Porta a RegisterPage do React.
+    let loading = false;
+    const draft = { name: '', org: '', email: '', password: '', accepted: false };
+
+    window.renderPage = function () {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      document.title = t('auth.registerTitle') + ' · ' + t('brand') + ' — Pesquisas & Formulários';
+
+      const input =
+        'h-11 w-full rounded-lg border border-themed bg-gray-50 px-3 text-sm text-body outline-none focus:border-brand-300 focus-ring dark:bg-gray-900';
+
+      const form =
+        '<form data-register class="space-y-4">' +
+        '<div><label class="mb-2 block text-sm font-medium text-heading" for="r-name">' + t('auth.name') + '</label>' +
+        '<input id="r-name" name="name" required value="' + esc(draft.name) + '" class="' + input + '"/></div>' +
+        '<div><label class="mb-2 block text-sm font-medium text-heading" for="r-org">' + t('auth.organization') + '</label>' +
+        '<input id="r-org" name="org" value="' + esc(draft.org) + '" class="' + input + '"/></div>' +
+        '<div><label class="mb-2 block text-sm font-medium text-heading" for="r-email">' + t('auth.email') + '</label>' +
+        '<input id="r-email" name="email" type="email" required value="' + esc(draft.email) + '" class="' + input + '"/></div>' +
+        '<div><label class="mb-2 block text-sm font-medium text-heading" for="r-password">' + t('auth.password') + '</label>' +
+        '<input id="r-password" name="password" type="password" required placeholder="••••••••" class="' + input + '"/></div>' +
+        '<label class="flex items-center gap-2 text-sm text-body">' +
+        '<input type="checkbox" name="accepted" required class="h-4 w-4 rounded border-themed accent-brand-500"/>' +
+        t('auth.terms') + '</label>' +
+        '<button type="submit" ' + (loading ? 'disabled' : '') +
+        ' class="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-brand-500 text-sm font-medium text-white transition hover:bg-brand-600 focus-ring disabled:opacity-60">' +
+        (loading
+          ? '<span class="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></span>'
+          : icon('check', { size: 18 }) + t('auth.registerCta')) +
+        '</button></form>';
+
+      const footer =
+        t('auth.hasAccount') + ' <a href="login.html" class="font-medium text-brand-500 hover:text-brand-600">' +
+        t('auth.loginLink') + '</a>';
+
+      const page = document.getElementById('page');
+      page.innerHTML = UI.authShell(t('auth.registerTitle'), t('auth.registerSubtitle'), form, footer);
+
+      page.querySelector('[data-register]').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        draft.name = e.target.name.value;
+        draft.org = e.target.org.value;
+        draft.email = e.target.email.value;
+        const password = e.target.password.value;
+        loading = true;
+        window.renderPage();
+        const ok = await Auth.register(draft.name, draft.email, password);
+        loading = false;
+        if (ok) {
+          if (draft.org) Auth.updateProfile({ organization: draft.org });
+          UI.notify(t('auth.registerSuccess'), 'success');
+          window.location.href = 'app.html';
+          return;
+        }
+        window.renderPage();
+      });
+    };
+  </script>
+  <script src="assets/js/layout.js"></script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Contatos — Sondagem</title>
+  <link rel="stylesheet" href="assets/css/tailwind.css" />
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/format.js"></script>
+  <script src="assets/js/query.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/sv.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/i18n.js"></script>
+</head>
+<body data-shell="app">
+  <div id="app"><div id="page"></div></div>
+
+  <script>
+    // Porta a ContactsPage do React: origem e nota (NPS) vêm das respostas —
+    // nada disso é gravado no contato.
+    const PAGE_SIZE = 10;
+    let term = '';
+    let tag = 'all';
+    let page = 1;
+    let editingId = null;
+
+    function enrich() {
+      const st = SV.get();
+      return st.contacts.map((contact) => {
+        const rows = st.responses
+          .filter((r) => r.contactId === contact.id)
+          .sort((a, b) => b.at.localeCompare(a.at));
+        let score = null;
+        for (const response of rows) {
+          const survey = st.surveys.find((s) => s.id === response.surveyId);
+          if (!survey) continue;
+          const question = Query.ordered(survey.questions).find((q) => q.type === 'nps');
+          if (!question) continue;
+          const answer = response.answers.find((a) => a.questionId === question.id);
+          if (answer && typeof answer.value === 'number') {
+            score = answer.value;
+            break;
+          }
+        }
+        return {
+          contact: contact,
+          responses: rows.length,
+          lastAt: rows[0] ? rows[0].at : contact.lastAt,
+          source: rows[0] ? rows[0].source : 'link',
+          score: score,
+        };
+      });
+    }
+
+    function scoreTone(score) {
+      if (score === null) return 'gray';
+      if (score >= 9) return 'success';
+      if (score >= 7) return 'warning';
+      return 'error';
+    }
+
+    window.onPageChange = function (next) {
+      page = next;
+      window.renderPage();
+    };
+
+    window.renderPage = function () {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      const st = SV.get();
+
+      document.title = t('contacts.title') + ' · ' + t('brand') + ' — Pesquisas & Formulários';
+
+      const tags = Query.allTags(st.contacts);
+      const needle = term.trim().toLowerCase();
+      const rows = enrich()
+        .filter((row) => (row.contact.name + ' ' + row.contact.email).toLowerCase().includes(needle))
+        .filter((row) => (tag === 'all' ? true : row.contact.tags.indexOf(tag) !== -1))
+        .sort((a, b) => (b.lastAt || '').localeCompare(a.lastAt || ''));
+
+      const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+      if (page > totalPages) page = totalPages;
+      const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+      const filters = UI.filterBar({
+        search: true,
+        searchValue: term,
+        searchPlaceholder: t('contacts.searchPlaceholder'),
+        children: UI.filterSelect({
+          name: 'tag',
+          label: t('contacts.tag'),
+          value: tag,
+          options: [{ value: 'all', label: t('common.all') }].concat(tags.map((item) => ({ value: item, label: item }))),
+        }),
+      });
+
+      const iconButton =
+        'flex h-9 w-9 items-center justify-center rounded-lg border border-themed text-muted transition hover:text-heading';
+
+      const body = rows.length === 0
+        ? '<div class="surface-card rounded-2xl border">' +
+          UI.emptyState({
+            icon: 'users',
+            title: t('contacts.emptyTitle'),
+            description: t('contacts.emptyDesc'),
+            action: '<button type="button" data-clear class="inline-flex h-10 items-center rounded-lg border border-themed px-4 text-sm font-medium text-body">' +
+              t('common.clearFilters') + '</button>',
+          }) +
+          '</div>'
+        : '<div class="surface-card overflow-hidden rounded-2xl border"><div class="overflow-x-auto">' +
+          '<table class="w-full min-w-[52rem] text-left text-sm"><thead><tr class="border-b border-themed">' +
+          '<th class="px-5 py-3 font-medium text-muted">' + t('contacts.person') + '</th>' +
+          '<th class="px-5 py-3 font-medium text-muted">' + t('contacts.tags') + '</th>' +
+          '<th class="px-5 py-3 font-medium text-muted">' + t('contacts.origin') + '</th>' +
+          '<th class="px-5 py-3 text-right font-medium text-muted">' + t('contacts.responses') + '</th>' +
+          '<th class="px-5 py-3 text-center font-medium text-muted">' + t('contacts.score') + '</th>' +
+          '<th class="px-5 py-3 font-medium text-muted">' + t('contacts.lastAt') + '</th>' +
+          '<th class="px-5 py-3 text-right font-medium text-muted">' + t('common.actions') + '</th></tr></thead><tbody>' +
+          pageRows.map((row) =>
+            '<tr class="border-b border-themed last:border-0 hover:bg-gray-50 dark:hover:bg-white/5">' +
+            '<td class="max-w-[18rem] px-5 py-3"><div class="flex min-w-0 items-center gap-3">' +
+            UI.avatar({ src: row.contact.avatar, name: row.contact.name, size: 'sm' }) +
+            '<div class="min-w-0"><p class="truncate font-medium text-heading">' + esc(row.contact.name) + '</p>' +
+            '<p class="truncate text-xs text-muted">' + esc(row.contact.email) + '</p></div></div></td>' +
+            '<td class="px-5 py-3"><div class="flex flex-wrap gap-1.5">' +
+            (row.contact.tags.length === 0 ? '<span class="text-xs text-muted">—</span>' : '') +
+            row.contact.tags.map((item) => UI.badge(item, 'gray')).join('') +
+            '</div></td>' +
+            '<td class="px-5 py-3">' + UI.sourceBadge(row.source) + '</td>' +
+            '<td class="px-5 py-3 text-right tabular-nums text-body">' + row.responses + '</td>' +
+            '<td class="px-5 py-3 text-center">' + UI.badge(row.score === null ? '—' : String(row.score), scoreTone(row.score)) + '</td>' +
+            '<td class="px-5 py-3 text-muted">' + (row.lastAt ? UI.fmtDate(row.lastAt) : '—') + '</td>' +
+            '<td class="px-5 py-3"><div class="flex items-center justify-end gap-1.5">' +
+            '<button type="button" data-edit="' + row.contact.id + '" title="' + esc(t('contacts.editTags')) + '" aria-label="' + esc(t('contacts.editTags')) +
+            '" class="' + iconButton + '">' + icon('tag', { size: 15 }) + '</button>' +
+            '<a href="mailto:' + esc(row.contact.email) + '" title="' + esc(t('contacts.sendEmail')) + '" aria-label="' + esc(t('contacts.sendEmail')) +
+            '" class="' + iconButton + '">' + icon('mail', { size: 15 }) + '</a>' +
+            '<button type="button" data-remove="' + row.contact.id + '" title="' + esc(t('common.remove')) + '" aria-label="' + esc(t('common.remove')) +
+            '" class="' + iconButton + ' hover:text-error-500">' + icon('trash', { size: 15 }) + '</button>' +
+            '</div></td></tr>'
+          ).join('') +
+          '</tbody></table></div></div>' +
+          '<div class="mt-5">' + UI.pagination(page, totalPages) + '</div>';
+
+      const modal = UI.modal('tags-modal', {
+        title: t('contacts.editTags'),
+        body:
+          '<label class="mb-1.5 block text-sm font-medium text-heading" for="tags">' + t('contacts.tags') + '</label>' +
+          '<input id="tags" placeholder="' + esc(t('contacts.tagsPlaceholder')) +
+          '" class="focus-ring w-full rounded-lg border border-themed bg-transparent px-3.5 py-2.5 text-sm text-body"/>' +
+          '<p class="mt-1.5 text-xs text-muted">' + t('contacts.tagsHint') + '</p>',
+        footer:
+          '<button type="button" data-modal-close class="h-10 rounded-lg border border-themed px-4 text-sm font-medium text-body">' + t('common.cancel') + '</button>' +
+          '<button type="button" data-save-tags class="h-10 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white transition hover:bg-brand-600">' +
+          t('common.save') + '</button>',
+      });
+
+      const el = document.getElementById('page');
+      el.innerHTML =
+        UI.pageHeader({ title: t('contacts.title'), subtitle: t('contacts.subtitle', { count: st.contacts.length }) }) +
+        filters + body + modal;
+
+      const search = el.querySelector('[data-filter-search]');
+      search.addEventListener('input', () => {
+        term = search.value;
+        page = 1;
+        window.renderPage();
+        const again = document.querySelector('[data-filter-search]');
+        again.focus();
+        again.setSelectionRange(again.value.length, again.value.length);
+      });
+      el.querySelector('[data-filter="tag"]').addEventListener('change', (e) => {
+        tag = e.target.value;
+        page = 1;
+        window.renderPage();
+      });
+      const clear = el.querySelector('[data-clear]');
+      if (clear) clear.addEventListener('click', () => { term = ''; tag = 'all'; page = 1; window.renderPage(); });
+
+      el.querySelectorAll('[data-edit]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          editingId = Number(btn.getAttribute('data-edit'));
+          const contact = st.contacts.find((c) => c.id === editingId);
+          const modalEl = document.getElementById('tags-modal');
+          modalEl.querySelector('[data-modal-subtitle]').textContent = contact ? contact.name : '';
+          modalEl.querySelector('#tags').value = contact ? contact.tags.join(', ') : '';
+          UI.openModal('tags-modal');
+        })
+      );
+
+      el.querySelector('[data-save-tags]').addEventListener('click', () => {
+        if (editingId === null) return;
+        const raw = document.getElementById('tags').value;
+        const parsed = raw.split(',').map((s) => s.trim()).filter(Boolean);
+        SV.updateContact(editingId, { tags: Array.from(new Set(parsed)) });
+        editingId = null;
+        UI.closeModal('tags-modal');
+        UI.notify(t('contacts.saved'), 'success');
+        window.renderPage();
+      });
+
+      el.querySelectorAll('[data-remove]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          SV.removeContact(Number(btn.getAttribute('data-remove')));
+          UI.notify(t('contacts.removed'), 'success');
+          window.renderPage();
+        })
+      );
+    };
+  </script>
+  <script src="assets/js/layout.js"></script>
+</body>
+</html>

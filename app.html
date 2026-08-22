@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Visão geral — Sondagem</title>
+  <link rel="stylesheet" href="assets/css/tailwind.css" />
+  <script src="https://cdn.jsdelivr.net/npm/apexcharts@3.49.1/dist/apexcharts.min.js"></script>
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/format.js"></script>
+  <script src="assets/js/query.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/sv.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/i18n.js"></script>
+</head>
+<body data-shell="app">
+  <div id="app"><div id="page"></div></div>
+
+  <script>
+    // Porta a DashboardPage do React: KPIs, respostas por dia (ApexCharts),
+    // origem, formulários mais respondidos, últimas respostas e situação.
+    let charts = [];
+    let series = [];
+
+    window.renderPage = function () {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      const st = SV.get();
+      const surveys = st.surveys, responses = st.responses, contacts = st.contacts;
+
+      document.title = t('appNav.dashboard') + ' · ' + t('brand') + ' — Pesquisas & Formulários';
+
+      const month = Query.responsesThisMonth(responses);
+      const rate = Query.completionRate(responses);
+      const avg = Query.averageSeconds(responses);
+
+      // NPS geral: junta as notas de todas as perguntas do tipo nps.
+      const values = [];
+      for (const survey of surveys) {
+        const question = Query.ordered(survey.questions).find((q) => q.type === 'nps');
+        if (!question) continue;
+        for (const response of responses) {
+          if (response.surveyId !== survey.id) continue;
+          const answer = response.answers.find((a) => a.questionId === question.id);
+          if (answer && typeof answer.value === 'number') values.push(answer.value);
+        }
+      }
+      const nps = Query.npsFrom(values);
+
+      series = Query.responsesPerDay(responses, 30);
+      const top = Query.topSurveys(surveys, responses, 5);
+      const latest = Query.latestResponses(responses, 6);
+      const sources = Query.sourceBreakdown(responses);
+
+      const header = UI.pageHeader({
+        title: t('dashboard.title'),
+        subtitle: t('dashboard.subtitle'),
+        action:
+          '<a href="app-formularios.html?novo=1" class="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white transition hover:bg-brand-600">' +
+          icon('plus', { size: 16 }) + t('forms.new') + '</a>',
+      });
+
+      const kpis =
+        '<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">' +
+        UI.kpiCard({ title: t('dashboard.kpi.month'), value: UI.fmtNumber(month), icon: 'inbox', accent: 'brand', hint: t('dashboard.kpi.monthHint', { total: responses.length }) }) +
+        UI.kpiCard({ title: t('dashboard.kpi.completion'), value: Math.round(rate * 100) + '%', icon: 'check-circle', accent: 'success', hint: t('dashboard.kpi.completionHint') }) +
+        UI.kpiCard({ title: t('dashboard.kpi.time'), value: Query.formatSeconds(avg), icon: 'clock', accent: 'warning', hint: t('dashboard.kpi.timeHint') }) +
+        UI.kpiCard({ title: t('dashboard.kpi.nps'), value: nps.total ? nps.score : '—', icon: 'gauge', accent: 'info', hint: t('dashboard.kpi.npsHint', { count: nps.total }) }) +
+        '</div>';
+
+      const chartRow =
+        '<div class="mt-6 grid gap-6 xl:grid-cols-3">' +
+        '<div class="surface-card min-w-0 rounded-2xl border p-5 shadow-theme-sm md:p-6 xl:col-span-2">' +
+        '<div class="flex flex-wrap items-center justify-between gap-3">' +
+        '<h2 class="text-base font-semibold text-heading">' + t('dashboard.charts.perDay') + '</h2>' +
+        '<span class="text-xs text-muted">' + t('dashboard.charts.lastDays', { count: 30 }) + '</span></div>' +
+        '<div class="mt-4" id="chart-per-day"></div></div>' +
+        '<div class="surface-card min-w-0 rounded-2xl border p-5 shadow-theme-sm md:p-6">' +
+        '<h2 class="text-base font-semibold text-heading">' + t('dashboard.sources') + '</h2>' +
+        '<p class="mt-1 text-xs text-muted">' + t('dashboard.sourcesHint') + '</p>' +
+        '<ul class="mt-5 flex flex-col gap-4">' +
+        sources.map((slice) =>
+          '<li class="min-w-0"><div class="flex items-center justify-between gap-3 text-sm">' +
+          '<span class="min-w-0 truncate text-body">' + t('sources.' + slice.label) + '</span>' +
+          '<span class="shrink-0 tabular-nums text-muted">' + slice.percent + '%</span></div>' +
+          '<div class="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">' +
+          '<div class="h-full rounded-full bg-brand-500" style="width:' + slice.percent + '%"></div></div></li>'
+        ).join('') +
+        '</ul></div></div>';
+
+      const topCard =
+        '<div class="surface-card min-w-0 rounded-2xl border p-5 shadow-theme-sm md:p-6">' +
+        '<div class="flex items-center justify-between gap-3"><h2 class="text-base font-semibold text-heading">' + t('dashboard.topForms') + '</h2>' +
+        '<a href="app-formularios.html" class="text-sm font-medium text-brand-600 dark:text-brand-400">' + t('common.viewAll') + '</a></div>' +
+        (top.length === 0
+          ? UI.emptyState({ icon: 'clipboard-list', title: t('dashboard.emptyTitle'), description: t('dashboard.emptyDesc') })
+          : '<ul class="mt-5 flex flex-col gap-4">' +
+            top.map((row) =>
+              '<li class="flex min-w-0 items-center gap-3"><div class="min-w-0 flex-1">' +
+              '<a href="app-respostas.html?id=' + row.survey.id + '" class="block truncate text-sm font-medium text-heading hover:text-brand-600">' +
+              esc(row.survey.title) + '</a>' +
+              '<div class="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">' +
+              '<div class="h-full rounded-full" style="width:' + (row.responses / Math.max(1, top[0].responses)) * 100 +
+              '%;background-color:' + esc(row.survey.color) + '"></div></div></div>' +
+              '<span class="shrink-0 text-sm font-semibold tabular-nums text-heading">' + row.responses + '</span></li>'
+            ).join('') +
+            '</ul>') +
+        '</div>';
+
+      const latestCard =
+        '<div class="surface-card min-w-0 rounded-2xl border p-5 shadow-theme-sm md:p-6">' +
+        '<h2 class="text-base font-semibold text-heading">' + t('dashboard.latest') + '</h2>' +
+        (latest.length === 0
+          ? UI.emptyState({ icon: 'inbox', title: t('dashboard.emptyTitle'), description: t('dashboard.emptyDesc') })
+          : '<ul class="mt-5 flex flex-col gap-4">' +
+            latest.map((response) => {
+              const survey = Query.surveyById(surveys, response.surveyId);
+              const contact = Query.contactById(contacts, response.contactId);
+              return '<li class="flex min-w-0 items-start gap-3">' +
+                '<span class="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-muted dark:bg-gray-800">' +
+                icon('inbox', { size: 15 }) + '</span>' +
+                '<div class="min-w-0 flex-1"><p class="truncate text-sm font-medium text-heading">' + esc(survey ? survey.title : '—') + '</p>' +
+                '<p class="truncate text-xs text-muted">' + esc(contact ? contact.name : t('results.anonymous')) + ' · ' +
+                UI.fmtDateTime(response.at) + '</p></div>' +
+                '<div class="hidden shrink-0 sm:block">' + UI.sourceBadge(response.source) + '</div></li>';
+            }).join('') +
+            '</ul>') +
+        '</div>';
+
+      const statusCard =
+        '<div class="surface-card mt-6 min-w-0 rounded-2xl border p-5 shadow-theme-sm md:p-6">' +
+        '<h2 class="text-base font-semibold text-heading">' + t('dashboard.statusTitle') + '</h2>' +
+        '<div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">' +
+        surveys.map((survey) =>
+          '<a href="app-construtor.html?id=' + survey.id + '" class="flex min-w-0 items-center justify-between gap-3 rounded-xl border border-themed px-4 py-3 transition hover:border-brand-300">' +
+          '<span class="min-w-0 truncate text-sm font-medium text-body">' + esc(survey.title) + '</span>' +
+          '<span class="shrink-0">' + UI.surveyStatus(survey.status) + '</span></a>'
+        ).join('') +
+        '</div></div>';
+
+      document.getElementById('page').innerHTML =
+        header + kpis + chartRow +
+        '<div class="mt-6 grid gap-6 xl:grid-cols-2">' + topCard + latestCard + '</div>' +
+        statusCard;
+
+      renderCharts();
+    };
+
+    function dayLabel(iso) {
+      const d = new Date(iso + 'T12:00:00');
+      return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+
+    function renderCharts() {
+      if (typeof ApexCharts === 'undefined') return;
+      charts.forEach((c) => c.destroy());
+      charts = [];
+
+      const el = document.getElementById('chart-per-day');
+      if (!el) return;
+
+      const dark = UIState.get().darkMode;
+      const fg = dark ? '#98a2b3' : '#667085';
+      const grid = dark ? '#1f2937' : '#e4e7ec';
+
+      const chart = new ApexCharts(el, {
+        chart: { type: 'area', height: 300, fontFamily: 'Outfit, sans-serif', foreColor: fg, toolbar: { show: false }, zoom: { enabled: false } },
+        colors: ['#465fff', '#12b76a', '#f79009', '#f04438', '#0ba5ec'],
+        grid: { borderColor: grid, strokeDashArray: 4 },
+        tooltip: { theme: dark ? 'dark' : 'light' },
+        legend: { labels: { colors: fg } },
+        dataLabels: { enabled: false },
+        stroke: { curve: 'smooth', width: 2 },
+        series: [{ name: UI.t('dashboard.charts.responsesSeries'), data: series.map((p) => p.value) }],
+        xaxis: { categories: series.map((p) => dayLabel(p.label)), tickAmount: 8 },
+        yaxis: { labels: { formatter: (v) => String(Math.round(v)) } },
+        fill: { type: 'gradient', gradient: { opacityFrom: 0.4, opacityTo: 0.05 } },
+      });
+      chart.render();
+      charts.push(chart);
+    }
+
+    window.onThemeChange = renderCharts;
+  </script>
+  <script src="assets/js/layout.js"></script>
+</body>
+</html>

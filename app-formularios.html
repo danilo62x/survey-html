@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Formulários — Sondagem</title>
+  <link rel="stylesheet" href="assets/css/tailwind.css" />
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/format.js"></script>
+  <script src="assets/js/query.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/sv.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/i18n.js"></script>
+</head>
+<body data-shell="app">
+  <div id="app"><div id="page"></div></div>
+
+  <script>
+    // Porta a FormsPage do React: busca, filtro por status, tabela ou cartões,
+    // duplicar, encerrar/publicar, copiar link público e excluir.
+    const STATUSES = ['rascunho', 'publicado', 'encerrado'];
+    let term = '';
+    let status = 'all';
+    let view = 'table';
+    let removing = null;
+    let openNew = new URLSearchParams(window.location.search).get('novo') === '1';
+
+    window.renderPage = function () {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      const st = SV.get();
+
+      document.title = t('forms.title') + ' · ' + t('brand') + ' — Pesquisas & Formulários';
+
+      const stats = Query.surveyStats(st.surveys, st.responses);
+      const needle = term.trim().toLowerCase();
+      const filtered = stats.filter((row) => {
+        const matchesTerm = (row.survey.title + ' ' + row.survey.description).toLowerCase().includes(needle);
+        const matchesStatus = status === 'all' || row.survey.status === status;
+        return matchesTerm && matchesStatus;
+      });
+
+      const header = UI.pageHeader({
+        title: t('forms.title'),
+        subtitle: t('forms.subtitle'),
+        action:
+          '<button type="button" data-new class="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white transition hover:bg-brand-600">' +
+          icon('plus', { size: 16 }) + t('forms.new') + '</button>',
+      });
+
+      const viewToggle =
+        '<div class="flex items-center gap-1 rounded-lg border border-themed p-1">' +
+        ['table', 'cards'].map((mode) =>
+          '<button type="button" data-view="' + mode + '" aria-label="' + esc(t(mode === 'table' ? 'forms.viewTable' : 'forms.viewCards')) +
+          '" title="' + esc(t(mode === 'table' ? 'forms.viewTable' : 'forms.viewCards')) +
+          '" class="flex h-8 w-8 items-center justify-center rounded-md transition ' +
+          (view === mode ? 'bg-brand-500 text-white' : 'text-muted hover:text-heading') + '">' +
+          icon(mode === 'table' ? 'list' : 'grid', { size: 16 }) + '</button>'
+        ).join('') +
+        '</div>';
+
+      const filters = UI.filterBar({
+        search: true,
+        searchValue: term,
+        searchPlaceholder: t('forms.searchPlaceholder'),
+        action: viewToggle,
+        children: UI.filterSelect({
+          name: 'status',
+          label: t('common.status'),
+          value: status,
+          options: [{ value: 'all', label: t('common.all') }].concat(
+            STATUSES.map((s) => ({ value: s, label: t('statuses.' + s) }))
+          ),
+        }),
+      });
+
+      const iconButton =
+        'flex h-9 w-9 items-center justify-center rounded-lg border border-themed text-muted transition hover:text-heading';
+
+      let body;
+      if (filtered.length === 0) {
+        body =
+          '<div class="surface-card rounded-2xl border">' +
+          UI.emptyState({
+            icon: 'clipboard-list',
+            title: t('forms.emptyTitle'),
+            description: t('forms.emptyDesc'),
+            action: '<button type="button" data-clear class="inline-flex h-10 items-center rounded-lg border border-themed px-4 text-sm font-medium text-body">' +
+              t('common.clearFilters') + '</button>',
+          }) +
+          '</div>';
+      } else if (view === 'cards') {
+        body = '<div class="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">' + filtered.map((row) => UI.surveyCard(row)).join('') + '</div>';
+      } else {
+        body =
+          '<div class="surface-card overflow-hidden rounded-2xl border"><div class="overflow-x-auto">' +
+          '<table class="w-full min-w-[56rem] text-left text-sm"><thead><tr class="border-b border-themed">' +
+          '<th class="px-5 py-3 font-medium text-muted">' + t('forms.form') + '</th>' +
+          '<th class="px-5 py-3 font-medium text-muted">' + t('common.status') + '</th>' +
+          '<th class="px-5 py-3 text-right font-medium text-muted">' + t('forms.responses') + '</th>' +
+          '<th class="px-5 py-3 text-right font-medium text-muted">' + t('forms.completion') + '</th>' +
+          '<th class="px-5 py-3 text-right font-medium text-muted">' + t('forms.avgTime') + '</th>' +
+          '<th class="px-5 py-3 text-right font-medium text-muted">' + t('forms.nps') + '</th>' +
+          '<th class="px-5 py-3 font-medium text-muted">' + t('forms.lastResponse') + '</th>' +
+          '<th class="px-5 py-3 text-right font-medium text-muted">' + t('common.actions') + '</th></tr></thead><tbody>' +
+          filtered.map((row) =>
+            '<tr class="border-b border-themed last:border-0 hover:bg-gray-50 dark:hover:bg-white/5">' +
+            '<td class="max-w-xs px-5 py-3">' +
+            '<a href="app-construtor.html?id=' + row.survey.id + '" class="block truncate font-medium text-heading hover:text-brand-600">' +
+            esc(row.survey.title) + '</a>' +
+            '<span class="block truncate text-xs text-muted">/f/' + esc(row.survey.slug) + '</span></td>' +
+            '<td class="px-5 py-3">' + UI.surveyStatus(row.survey.status) + '</td>' +
+            '<td class="px-5 py-3 text-right tabular-nums text-body">' + row.responses + '</td>' +
+            '<td class="px-5 py-3 text-right tabular-nums text-body">' + Math.round(row.completionRate * 100) + '%</td>' +
+            '<td class="px-5 py-3 text-right tabular-nums text-body">' + (row.responses ? Query.formatSeconds(row.averageSeconds) : '—') + '</td>' +
+            '<td class="px-5 py-3 text-right tabular-nums text-body">' + (row.nps === null ? '—' : row.nps) + '</td>' +
+            '<td class="px-5 py-3 text-muted">' + (row.lastAt ? UI.fmtDate(row.lastAt) : '—') + '</td>' +
+            '<td class="px-5 py-3"><div class="flex items-center justify-end gap-1.5">' +
+            '<a href="app-respostas.html?id=' + row.survey.id + '" class="' + iconButton + '" title="' + esc(t('forms.results')) +
+            '" aria-label="' + esc(t('forms.results')) + '">' + icon('chart', { size: 15 }) + '</a>' +
+            '<button type="button" data-copy-link="' + esc(row.survey.slug) + '" class="' + iconButton + '" title="' + esc(t('forms.copyLink')) +
+            '" aria-label="' + esc(t('forms.copyLink')) + '">' + icon('link', { size: 15 }) + '</button>' +
+            '<button type="button" data-duplicate="' + row.survey.id + '" class="' + iconButton + '" title="' + esc(t('forms.duplicate')) +
+            '" aria-label="' + esc(t('forms.duplicate')) + '">' + icon('copy', { size: 15 }) + '</button>' +
+            (row.survey.status === 'publicado'
+              ? '<button type="button" data-close="' + row.survey.id + '" class="' + iconButton + '" title="' + esc(t('forms.close')) +
+                '" aria-label="' + esc(t('forms.close')) + '">' + icon('lock', { size: 15 }) + '</button>'
+              : '<button type="button" data-publish="' + row.survey.id + '" class="' + iconButton + '" title="' + esc(t('forms.publish')) +
+                '" aria-label="' + esc(t('forms.publish')) + '">' + icon('rocket', { size: 15 }) + '</button>') +
+            '<button type="button" data-remove="' + row.survey.id + '" class="' + iconButton + ' hover:text-error-500" title="' + esc(t('common.remove')) +
+            '" aria-label="' + esc(t('common.remove')) + '">' + icon('trash', { size: 15 }) + '</button>' +
+            '</div></td></tr>'
+          ).join('') +
+          '</tbody></table></div></div>';
+      }
+
+      const newModal = UI.modal('new-modal', {
+        title: t('forms.newTitle'),
+        subtitle: t('forms.newSubtitle'),
+        body:
+          '<div class="flex flex-col gap-4">' +
+          '<div><label class="mb-1.5 block text-sm font-medium text-heading" for="new-title">' + t('forms.formTitle') + '</label>' +
+          '<input id="new-title" placeholder="' + esc(t('forms.formTitlePlaceholder')) +
+          '" class="focus-ring w-full rounded-lg border border-themed bg-transparent px-3.5 py-2.5 text-sm text-body"/></div>' +
+          '<div><label class="mb-1.5 block text-sm font-medium text-heading" for="new-template">' + t('forms.startFrom') + '</label>' +
+          '<select id="new-template" class="focus-ring w-full rounded-lg border border-themed bg-transparent px-3.5 py-2.5 text-sm text-body">' +
+          '<option value="">' + t('forms.blank') + '</option>' +
+          st.templates.map((tpl) => '<option value="' + tpl.id + '">' + esc(tpl.name) + '</option>').join('') +
+          '</select><p class="mt-1.5 text-xs text-muted">' + t('forms.startFromHint') + '</p></div></div>',
+        footer:
+          '<button type="button" data-modal-close class="h-10 rounded-lg border border-themed px-4 text-sm font-medium text-body">' + t('common.cancel') + '</button>' +
+          '<button type="button" data-create disabled class="h-10 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50">' +
+          t('common.create') + '</button>',
+      });
+
+      const removeModal = UI.modal('remove-modal', {
+        title: t('forms.removeTitle'),
+        size: 'sm',
+        body: '<p class="text-sm text-muted">' + t('forms.removeDesc') + '</p>',
+        footer:
+          '<button type="button" data-modal-close class="h-10 rounded-lg border border-themed px-4 text-sm font-medium text-body">' + t('common.cancel') + '</button>' +
+          '<button type="button" data-confirm-remove class="h-10 rounded-lg bg-error-500 px-4 text-sm font-medium text-white transition hover:bg-error-600">' +
+          t('common.remove') + '</button>',
+      });
+
+      const page = document.getElementById('page');
+      page.innerHTML = header + filters + body + newModal + removeModal;
+
+      // --- filtros -------------------------------------------------------
+      const search = page.querySelector('[data-filter-search]');
+      search.addEventListener('input', () => {
+        term = search.value;
+        window.renderPage();
+        const again = document.querySelector('[data-filter-search]');
+        again.focus();
+        again.setSelectionRange(again.value.length, again.value.length);
+      });
+      page.querySelector('[data-filter="status"]').addEventListener('change', (e) => {
+        status = e.target.value;
+        window.renderPage();
+      });
+      page.querySelectorAll('[data-view]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          view = btn.getAttribute('data-view');
+          window.renderPage();
+        })
+      );
+      const clear = page.querySelector('[data-clear]');
+      if (clear) clear.addEventListener('click', () => { term = ''; status = 'all'; window.renderPage(); });
+
+      // --- ações da tabela ------------------------------------------------
+      page.querySelectorAll('[data-copy-link]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          UI.copyText(UI.publicLink(btn.getAttribute('data-copy-link'))).then(() => UI.notify(t('forms.linkCopied'), 'success'));
+        })
+      );
+      page.querySelectorAll('[data-duplicate]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          SV.duplicateSurvey(Number(btn.getAttribute('data-duplicate')));
+          UI.notify(t('forms.duplicated'), 'success');
+          window.renderPage();
+        })
+      );
+      page.querySelectorAll('[data-publish]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          SV.publishSurvey(Number(btn.getAttribute('data-publish')));
+          UI.notify(t('forms.published'), 'success');
+          window.renderPage();
+        })
+      );
+      page.querySelectorAll('[data-close]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          SV.closeSurvey(Number(btn.getAttribute('data-close')));
+          UI.notify(t('forms.closed'), 'success');
+          window.renderPage();
+        })
+      );
+      page.querySelectorAll('[data-remove]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          removing = Number(btn.getAttribute('data-remove'));
+          UI.openModal('remove-modal');
+        })
+      );
+      page.querySelector('[data-confirm-remove]').addEventListener('click', () => {
+        if (removing !== null) SV.removeSurvey(removing);
+        removing = null;
+        UI.closeModal('remove-modal');
+        UI.notify(t('forms.removed'), 'success');
+        window.renderPage();
+      });
+
+      // --- novo formulário -------------------------------------------------
+      const titleInput = page.querySelector('#new-title');
+      const templateSelect = page.querySelector('#new-template');
+      const createBtn = page.querySelector('[data-create]');
+
+      const refreshCreate = () => {
+        createBtn.disabled = !titleInput.value.trim() && !templateSelect.value;
+      };
+      titleInput.addEventListener('input', refreshCreate);
+      templateSelect.addEventListener('change', refreshCreate);
+
+      page.querySelector('[data-new]').addEventListener('click', () => UI.openModal('new-modal'));
+
+      createBtn.addEventListener('click', () => {
+        const name = titleInput.value.trim();
+        const templateId = templateSelect.value;
+        if (!name && !templateId) return;
+        const created = templateId
+          ? SV.createFromTemplate(Number(templateId), name)
+          : SV.addSurvey(name, t('forms.newDescription'));
+        UI.closeModal('new-modal');
+        if (created) {
+          UI.notify(t('forms.created'), 'success');
+          window.location.href = 'app-construtor.html?id=' + created.id;
+        }
+      });
+
+      if (openNew) {
+        openNew = false;
+        history.replaceState(null, '', 'app-formularios.html');
+        UI.openModal('new-modal');
+      }
+    };
+  </script>
+  <script src="assets/js/layout.js"></script>
+</body>
+</html>

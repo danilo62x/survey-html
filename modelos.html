@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Modelos por objetivo — Sondagem</title>
+  <link rel="stylesheet" href="assets/css/tailwind.css" />
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/format.js"></script>
+  <script src="assets/js/query.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/sv.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/i18n.js"></script>
+</head>
+<body data-shell="public">
+  <div id="app"><div id="page"></div></div>
+
+  <script>
+    // Porta a TemplatesPage do React: galeria por objetivo + prévia das perguntas.
+    let term = '';
+
+    function previewBody(template) {
+      const t = UI.t;
+      return '<div class="flex flex-col gap-8">' +
+        Query.ordered(template.questions).map((question, index) =>
+          '<div class="min-w-0 border-b border-themed pb-6 last:border-0 last:pb-0">' +
+          '<p class="mb-2 text-xs text-muted">' + t('results.questionNumber', { index: index + 1 }) + ' · ' + t('questionTypes.' + question.type) + '</p>' +
+          UI.questionRenderer(question, undefined, { color: template.color, preview: true }) +
+          '</div>'
+        ).join('') +
+        '</div>';
+    }
+
+    function openPreview(template) {
+      const modal = document.getElementById('tpl-modal');
+      modal.querySelector('[data-modal-title]').textContent = template.name;
+      modal.querySelector('[data-modal-subtitle]').textContent = template.objective;
+      modal.querySelector('[data-modal-body]').innerHTML = previewBody(template);
+      UI.openModal('tpl-modal');
+    }
+
+    window.renderPage = function () {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      const templates = SV.get().templates;
+
+      document.title = t('templates.publicTitle') + ' · ' + t('brand') + ' — Pesquisas & Formulários';
+
+      const needle = term.trim().toLowerCase();
+      const filtered = templates.filter((tpl) => (tpl.name + ' ' + tpl.objective).toLowerCase().includes(needle));
+
+      const header =
+        '<header class="max-w-2xl">' +
+        '<p class="text-sm font-semibold tracking-wider text-brand-500 uppercase">' + t('templates.eyebrow') + '</p>' +
+        '<h1 class="mt-2 text-title-sm font-bold text-heading sm:text-title-md">' + t('templates.publicTitle') + '</h1>' +
+        '<p class="mt-3 text-muted">' + t('templates.publicSubtitle') + '</p></header>';
+
+      const search =
+        '<div class="mt-8 max-w-md"><div class="relative">' +
+        '<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted">' + icon('search', { size: 16 }) + '</span>' +
+        '<input data-search value="' + esc(term) + '" placeholder="' + esc(t('templates.searchPlaceholder')) +
+        '" class="focus-ring surface-card w-full rounded-xl border py-2.5 pr-3 pl-9 text-sm text-body"/></div></div>';
+
+      const grid = filtered.length === 0
+        ? UI.emptyState({
+            icon: 'layers',
+            title: t('templates.emptyTitle'),
+            description: t('templates.emptyDesc'),
+            action: '<button type="button" data-clear class="inline-flex h-10 items-center rounded-lg border border-themed px-4 text-sm font-medium text-body">' +
+              t('common.clearFilters') + '</button>',
+          })
+        : '<div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">' +
+          filtered.map((template) =>
+            '<div id="' + esc(template.slug) + '">' +
+            UI.templateCard(template, { actionLabel: t('templates.preview'), action: 'data-preview="' + template.id + '"' }) +
+            '</div>'
+          ).join('') +
+          '</div>';
+
+      const cta =
+        '<section class="mt-14 overflow-hidden rounded-3xl border border-themed bg-brand-500 px-6 py-10 text-center sm:px-10">' +
+        '<h2 class="text-title-sm font-bold text-white">' + t('templates.ctaTitle') + '</h2>' +
+        '<p class="mx-auto mt-3 max-w-xl text-sm text-white/80">' + t('templates.ctaDesc') + '</p>' +
+        '<a href="registro.html" class="mt-6 inline-flex h-12 items-center gap-2 rounded-xl bg-white px-6 text-sm font-medium text-brand-600 transition hover:bg-brand-50">' +
+        icon('plus', { size: 18 }) + t('templates.ctaButton') + '</a></section>';
+
+      const modal = UI.modal('tpl-modal', {
+        size: 'xl',
+        footer:
+          '<button type="button" data-modal-close class="h-10 rounded-lg border border-themed px-4 text-sm font-medium text-body">' + t('common.close') + '</button>' +
+          '<a href="registro.html" class="flex h-10 items-center rounded-lg bg-brand-500 px-4 text-sm font-medium text-white transition hover:bg-brand-600">' +
+          t('templates.useTemplate') + '</a>',
+      });
+
+      const page = document.getElementById('page');
+      page.innerHTML =
+        '<div class="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8 lg:py-16">' + header + search + grid + cta + modal + '</div>';
+
+      const input = page.querySelector('[data-search]');
+      if (input) {
+        input.addEventListener('input', () => {
+          term = input.value;
+          window.renderPage();
+          const again = document.querySelector('[data-search]');
+          if (again) {
+            again.focus();
+            again.setSelectionRange(again.value.length, again.value.length);
+          }
+        });
+      }
+      const clear = page.querySelector('[data-clear]');
+      if (clear) clear.addEventListener('click', () => { term = ''; window.renderPage(); });
+
+      page.querySelectorAll('[data-preview]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const found = templates.find((tpl) => tpl.id === Number(btn.getAttribute('data-preview')));
+          if (found) openPreview(found);
+        });
+      });
+
+      // Vindo da home com #slug, o modelo já abre em prévia.
+      const slug = decodeURIComponent(window.location.hash.replace('#', ''));
+      if (slug) {
+        const found = templates.find((tpl) => tpl.slug === slug);
+        if (found) openPreview(found);
+      }
+    };
+  </script>
+  <script src="assets/js/layout.js"></script>
+</body>
+</html>

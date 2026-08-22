@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Construtor — Sondagem</title>
+  <link rel="stylesheet" href="assets/css/tailwind.css" />
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/format.js"></script>
+  <script src="assets/js/query.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/sv.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/i18n.js"></script>
+</head>
+<body data-shell="app">
+  <div id="app"><div id="page"></div></div>
+
+  <script>
+    // Porta a BuilderPage do React: abas Perguntas (lista arrastável + painel
+    // lateral + prévia ao vivo), Lógica, Aparência e Compartilhar.
+    const COLORS = ['#465fff', '#12b76a', '#f79009', '#f04438', '#0ba5ec', '#7592ff', '#2a31d8', '#039855'];
+    const COVERS = ['atendimento', 'mercado', 'evento', 'time', 'conceito', 'workshop'];
+
+    const surveyId = Number(new URLSearchParams(window.location.search).get('id'));
+    let tab = 0;
+    let selectedId = null;
+    let adding = false;
+    let previewValue = undefined;
+    let listMount = null;
+    let editorMount = null;
+    let rulesMount = null;
+
+    function surveyOf() {
+      return SV.get().surveys.find((s) => s.id === surveyId);
+    }
+
+    // ---- Aba Perguntas --------------------------------------------------
+    function questionsTabHtml(survey, questions) {
+      const t = UI.t, icon = UI.icon;
+      const left =
+        '<div class="min-w-0 xl:col-span-5">' +
+        '<div class="flex items-center justify-between gap-3">' +
+        '<h2 class="text-base font-semibold text-heading">' + t('builder.questionsCount', { count: questions.length }) + '</h2>' +
+        '<button type="button" data-toggle-add class="inline-flex h-9 items-center gap-1.5 rounded-lg bg-brand-500 px-3.5 text-xs font-medium text-white transition hover:bg-brand-600">' +
+        icon(adding ? 'x' : 'plus', { size: 14 }) + t(adding ? 'common.close' : 'builder.addQuestion') + '</button></div>' +
+        (adding
+          ? '<div class="surface-card mt-4 grid gap-2 rounded-2xl border p-4 sm:grid-cols-2">' +
+            Data.QUESTION_TYPES.map((type) =>
+              '<button type="button" data-add-type="' + type + '" class="flex min-w-0 items-center gap-2.5 rounded-xl border border-themed px-3 py-2.5 text-left transition hover:border-brand-300">' +
+              '<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white" style="background-color:' + Data.QUESTION_COLOR[type] + '">' +
+              icon(Data.QUESTION_ICON[type], { size: 15 }) + '</span>' +
+              '<span class="min-w-0"><span class="block truncate text-sm font-medium text-heading">' + t('questionTypes.' + type) + '</span>' +
+              '<span class="block truncate text-[11px] text-muted">' + t('questionTypeHints.' + type) + '</span></span></button>'
+            ).join('') +
+            '</div>'
+          : '') +
+        '<p class="mt-4 flex items-start gap-2 text-xs text-muted">' +
+        icon('grip', { size: 14, className: 'mt-0.5 shrink-0' }) + '<span>' + t('builder.dragHint') + '</span></p>' +
+        '<div class="mt-3">' +
+        (questions.length === 0
+          ? '<div class="surface-card rounded-2xl border">' +
+            UI.emptyState({
+              icon: 'clipboard-list',
+              title: t('builder.emptyTitle'),
+              description: t('builder.emptyDesc'),
+              action: '<button type="button" data-toggle-add class="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white">' +
+                icon('plus', { size: 16 }) + t('builder.addQuestion') + '</button>',
+            }) +
+            '</div>'
+          : '<div data-question-list></div>') +
+        '</div></div>';
+
+      const selected = questions.find((q) => q.id === selectedId) || null;
+      const right =
+        '<div class="min-w-0 xl:col-span-7">' +
+        (selected
+          ? '<div class="grid gap-6 lg:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">' +
+            '<div class="surface-card min-w-0 rounded-2xl border p-5 md:p-6">' +
+            '<h2 class="mb-5 text-base font-semibold text-heading">' + t('builder.editorTitle') + '</h2>' +
+            '<div data-question-editor></div></div>' +
+            '<div class="min-w-0"><div class="surface-card min-w-0 rounded-2xl border p-5 md:p-6">' +
+            '<div class="mb-5 flex items-center justify-between gap-3">' +
+            '<h2 class="text-base font-semibold text-heading">' + t('builder.previewTitle') + '</h2>' +
+            '<span class="inline-flex items-center gap-1.5 rounded-full bg-success-50 px-2.5 py-1 text-[11px] font-medium text-success-700 dark:bg-success-500/15 dark:text-success-500">' +
+            '<span class="h-1.5 w-1.5 rounded-full bg-success-500"></span>' + t('builder.previewLive') + '</span></div>' +
+            '<div class="mb-6" data-preview-progress></div>' +
+            '<div data-preview-question></div>' +
+            '<p class="mt-6 border-t border-themed pt-4 text-xs text-muted">' + t('builder.previewHint') + '</p>' +
+            '</div></div></div>'
+          : '<div class="surface-card rounded-2xl border">' +
+            UI.emptyState({ icon: 'edit', title: t('builder.selectTitle'), description: t('builder.selectDesc') }) + '</div>') +
+        '</div>';
+
+      return '<div class="grid gap-6 xl:grid-cols-12">' + left + right + '</div>';
+    }
+
+    function renderPreview(survey, questions, selected) {
+      const panel = document.querySelector('[data-preview-question]');
+      const progress = document.querySelector('[data-preview-progress]');
+      if (!panel || !selected) return;
+      const index = questions.findIndex((q) => q.id === selected.id);
+      progress.innerHTML = UI.progressBar(
+        index + 1,
+        questions.length,
+        Math.round((index / Math.max(1, questions.length)) * 100),
+        survey.color
+      );
+      UI.mountQuestion(panel, {
+        question: selected,
+        value: previewValue,
+        color: survey.color,
+        onChange: (v) => { previewValue = v; },
+      });
+    }
+
+    function mountQuestionsTab() {
+      const t = UI.t;
+      const survey = surveyOf();
+      const questions = Query.ordered(survey.questions);
+      const selected = questions.find((q) => q.id === selectedId) || null;
+
+      document.querySelectorAll('[data-toggle-add]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          adding = !adding;
+          renderTab();
+        })
+      );
+      document.querySelectorAll('[data-add-type]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          const created = SV.addQuestion(survey.id, btn.getAttribute('data-add-type'));
+          adding = false;
+          if (created) {
+            selectedId = created.id;
+            previewValue = undefined;
+            UI.notify(t('builder.questionAdded'), 'success');
+          }
+          renderTab();
+        })
+      );
+
+      const listSlot = document.querySelector('[data-question-list]');
+      if (listSlot) {
+        listMount = UI.mountQuestionList(listSlot, {
+          questions: questions,
+          selectedId: selectedId,
+          conditional: Query.conditionalIds(survey.logic),
+          onSelect: (id) => {
+            selectedId = id;
+            previewValue = undefined;
+            renderTab();
+          },
+          onMove: (from, to) => {
+            SV.moveQuestion(survey.id, from, to);
+            renderTab();
+          },
+          onRemove: (id) => {
+            SV.removeQuestion(survey.id, id);
+            if (selectedId === id) selectedId = null;
+            UI.notify(t('builder.questionRemoved'), 'success');
+            renderTab();
+          },
+          onDuplicate: (id) => {
+            SV.duplicateQuestion(survey.id, id);
+            UI.notify(t('builder.questionDuplicated'), 'success');
+            renderTab();
+          },
+        });
+      }
+
+      const editorSlot = document.querySelector('[data-question-editor]');
+      if (editorSlot && selected) {
+        editorMount = UI.mountQuestionEditor(editorSlot, {
+          question: selected,
+          onChange: (patch, structural) => {
+            SV.updateQuestion(survey.id, selected.id, patch);
+            const fresh = surveyOf();
+            const list = Query.ordered(fresh.questions);
+            const next = list.find((q) => q.id === selected.id);
+            if (structural) {
+              previewValue = undefined;
+              renderTab();
+              return;
+            }
+            // Sem re-render do painel: só a lista e a prévia acompanham o texto.
+            if (listMount) listMount.update({ questions: list, selectedId: selectedId, conditional: Query.conditionalIds(fresh.logic) });
+            renderPreview(fresh, list, next);
+          },
+          onRemove: () => {
+            SV.removeQuestion(survey.id, selected.id);
+            selectedId = null;
+            UI.notify(t('builder.questionRemoved'), 'success');
+            renderTab();
+          },
+        });
+        renderPreview(survey, questions, selected);
+      }
+    }
+
+    // ---- Aba Lógica -----------------------------------------------------
+    function logicTabHtml(survey, questions) {
+      const t = UI.t, icon = UI.icon;
+      return '<div>' +
+        '<div class="flex flex-wrap items-start justify-between gap-3"><div class="max-w-2xl">' +
+        '<h2 class="text-base font-semibold text-heading">' + t('logic.title') + '</h2>' +
+        '<p class="mt-1 text-sm text-muted">' + t('logic.subtitle') + '</p></div>' +
+        '<button type="button" data-add-rule ' + (questions.length < 2 ? 'disabled' : '') +
+        ' class="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white transition hover:bg-brand-600 disabled:opacity-50">' +
+        icon('plus', { size: 16 }) + t('logic.addRule') + '</button></div>' +
+        '<div class="mt-5 grid gap-3 sm:grid-cols-3">' +
+        ['pular-para', 'mostrar', 'esconder'].map((action) =>
+          '<div class="rounded-xl border border-dashed border-themed p-4">' +
+          '<p class="text-sm font-medium text-heading">' + t('logic.actions.' + action) + '</p>' +
+          '<p class="mt-1 text-xs text-muted">' + t('logic.actionHints.' + action) + '</p></div>'
+        ).join('') +
+        '</div>' +
+        (survey.logic.length === 0
+          ? '<div class="surface-card mt-6 rounded-2xl border">' +
+            UI.emptyState({ icon: 'git-branch', title: t('logic.emptyTitle'), description: t('logic.emptyDesc') }) + '</div>'
+          : '<div class="mt-6" data-logic-rules></div>') +
+        '</div>';
+    }
+
+    function mountLogicTab() {
+      const t = UI.t;
+      const survey = surveyOf();
+      const questions = Query.ordered(survey.questions);
+
+      document.querySelector('[data-add-rule]').addEventListener('click', () => {
+        SV.addRule(survey.id);
+        renderTab();
+      });
+
+      const slot = document.querySelector('[data-logic-rules]');
+      if (slot) {
+        rulesMount = UI.mountLogicRules(slot, {
+          rules: survey.logic,
+          questions: questions,
+          onChange: (ruleId, patch) => {
+            SV.updateRule(survey.id, ruleId, patch);
+            renderTab();
+          },
+          onRemove: (ruleId) => {
+            SV.removeRule(survey.id, ruleId);
+            UI.notify(t('logic.ruleRemoved'), 'success');
+            renderTab();
+          },
+        });
+      }
+    }
+
+    // ---- Aba Aparência ---------------------------------------------------
+    function appearanceTabHtml(survey) {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      const control = 'focus-ring w-full rounded-lg border border-themed bg-transparent px-3.5 py-2.5 text-sm text-body';
+      return '<div class="grid gap-6 lg:grid-cols-3">' +
+        '<div class="surface-card min-w-0 rounded-2xl border p-5 md:p-6 lg:col-span-2">' +
+        '<h2 class="text-base font-semibold text-heading">' + t('appearance.title') + '</h2>' +
+        '<p class="mt-1 text-sm text-muted">' + t('appearance.subtitle') + '</p>' +
+        '<div class="mt-6 flex flex-col gap-5">' +
+        '<div><label class="mb-1.5 block text-sm font-medium text-heading" for="s-title">' + t('appearance.formTitle') + '</label>' +
+        '<input id="s-title" data-survey-field="title" value="' + esc(survey.title) + '" class="' + control + '"/></div>' +
+        '<div><label class="mb-1.5 block text-sm font-medium text-heading" for="s-desc">' + t('appearance.description') + '</label>' +
+        '<textarea id="s-desc" rows="3" data-survey-field="description" class="' + control + ' resize-y">' + esc(survey.description) + '</textarea></div>' +
+        '<div><p class="mb-2 block text-sm font-medium text-heading">' + t('appearance.color') + '</p>' +
+        '<div class="flex flex-wrap items-center gap-2">' +
+        COLORS.map((color) =>
+          '<button type="button" data-color="' + color + '" aria-label="' + color + '" class="h-9 w-9 rounded-full border-2 transition ' +
+          (survey.color === color ? 'border-heading scale-110' : 'border-transparent') + '" style="background-color:' + color + '"></button>'
+        ).join('') +
+        '<input type="color" data-color-custom value="' + esc(survey.color) + '" aria-label="' + esc(t('appearance.customColor')) + '" class="h-9 w-12"/>' +
+        '</div></div>' +
+        '<div><p class="mb-2 block text-sm font-medium text-heading">' + t('appearance.cover') + '</p>' +
+        '<div class="grid grid-cols-2 gap-3 sm:grid-cols-3">' +
+        COVERS.map((seed) =>
+          '<button type="button" data-cover="' + seed + '" class="relative overflow-hidden rounded-xl border-2 transition ' +
+          (survey.coverSeed === seed ? 'border-brand-500' : 'border-transparent hover:border-brand-200') + '">' +
+          '<img src="' + esc(Data.svImage(seed, 320, 160)) + '" alt="" loading="lazy" class="h-20 w-full object-cover"/>' +
+          (survey.coverSeed === seed
+            ? '<span class="absolute top-1.5 right-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-brand-500 text-white">' +
+              icon('check', { size: 13, strokeWidth: 3 }) + '</span>'
+            : '') +
+          '</button>'
+        ).join('') +
+        '</div></div>' +
+        '<div><label class="mb-1.5 block text-sm font-medium text-heading" for="s-thanks">' + t('appearance.thankYou') + '</label>' +
+        '<textarea id="s-thanks" rows="3" data-survey-field="thankYou" class="' + control + ' resize-y">' + esc(survey.thankYou) + '</textarea>' +
+        '<p class="mt-1.5 text-xs text-muted">' + t('appearance.thankYouHint') + '</p></div>' +
+        '</div></div>' +
+        '<div class="surface-card min-w-0 rounded-2xl border p-5 md:p-6">' +
+        '<h2 class="text-base font-semibold text-heading">' + t('appearance.previewTitle') + '</h2>' +
+        '<div class="mt-4 overflow-hidden rounded-2xl border border-themed" data-appearance-preview>' + appearancePreview(survey) + '</div>' +
+        '<p class="mt-4 text-xs text-muted">' + t('appearance.previewHint') + '</p></div>' +
+        '</div>';
+    }
+
+    function appearancePreview(survey) {
+      const t = UI.t, esc = UI.esc;
+      return '<img src="' + esc(Data.svImage(survey.coverSeed, 640, 280)) + '" alt="" class="h-28 w-full object-cover"/>' +
+        '<div class="p-4"><p class="text-sm font-semibold break-words text-heading">' + esc(survey.title) + '</p>' +
+        '<p class="mt-1 line-clamp-3 text-xs text-muted">' + esc(survey.description) + '</p>' +
+        '<span class="mt-4 flex h-10 items-center justify-center rounded-lg text-xs font-medium text-white" style="background-color:' +
+        esc(survey.color) + '">' + t('fill.start') + '</span></div>';
+    }
+
+    function mountAppearanceTab() {
+      const survey = surveyOf();
+      const preview = document.querySelector('[data-appearance-preview]');
+
+      document.querySelectorAll('[data-survey-field]').forEach((el) =>
+        el.addEventListener('input', () => {
+          const patch = {};
+          patch[el.getAttribute('data-survey-field')] = el.value;
+          SV.updateSurvey(survey.id, patch);
+          preview.innerHTML = appearancePreview(surveyOf());
+          if (el.getAttribute('data-survey-field') === 'title') {
+            const heading = document.querySelector('[data-builder-title]');
+            if (heading) heading.textContent = el.value;
+          }
+        })
+      );
+      document.querySelectorAll('[data-color]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          SV.updateSurvey(survey.id, { color: btn.getAttribute('data-color') });
+          renderTab();
+        })
+      );
+      const custom = document.querySelector('[data-color-custom]');
+      if (custom) custom.addEventListener('input', () => {
+        SV.updateSurvey(survey.id, { color: custom.value });
+        preview.innerHTML = appearancePreview(surveyOf());
+      });
+      document.querySelectorAll('[data-cover]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          SV.updateSurvey(survey.id, { coverSeed: btn.getAttribute('data-cover') });
+          renderTab();
+        })
+      );
+    }
+
+    // ---- Abas ------------------------------------------------------------
+    function renderTab() {
+      const survey = surveyOf();
+      if (!survey) return;
+      const questions = Query.ordered(survey.questions);
+      if (!selectedId || !questions.some((q) => q.id === selectedId)) {
+        selectedId = questions.length ? questions[0].id : null;
+      }
+
+      const panel = document.querySelector('[data-tab-panel]');
+      if (!panel) return;
+
+      if (tab === 0) {
+        panel.innerHTML = questionsTabHtml(survey, questions);
+        mountQuestionsTab();
+      } else if (tab === 1) {
+        panel.innerHTML = logicTabHtml(survey, questions);
+        mountLogicTab();
+      } else if (tab === 2) {
+        panel.innerHTML = appearanceTabHtml(survey);
+        mountAppearanceTab();
+      } else {
+        panel.innerHTML = UI.shareBox(survey);
+        UI.bindShareBox(panel);
+      }
+
+      document.querySelectorAll('[data-tabs] [data-tab]').forEach((btn, i) => {
+        const active = i === tab;
+        btn.setAttribute('aria-selected', String(active));
+        btn.className =
+          '-mb-px inline-flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition ' +
+          (active
+            ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+            : 'border-transparent text-muted hover:border-gray-300 hover:text-body dark:hover:border-gray-700');
+      });
+    }
+
+    window.onTabChange = function (index) {
+      tab = index;
+      renderTab();
+    };
+
+    window.renderPage = function () {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      const page = document.getElementById('page');
+      const survey = surveyOf();
+
+      if (!survey) {
+        document.title = t('builder.notFoundTitle') + ' · ' + t('brand');
+        page.innerHTML = UI.emptyState({
+          icon: 'clipboard-list',
+          title: t('builder.notFoundTitle'),
+          description: t('builder.notFoundDesc'),
+          action: '<a href="app-formularios.html" class="inline-flex h-10 items-center rounded-lg bg-brand-500 px-4 text-sm font-medium text-white">' +
+            t('builder.backToForms') + '</a>',
+        });
+        return;
+      }
+
+      document.title = survey.title + ' · ' + t('brand') + ' — Pesquisas & Formulários';
+
+      const action =
+        '<div class="flex flex-wrap items-center gap-2">' + UI.surveyStatus(survey.status) +
+        '<a href="formulario.html?slug=' + encodeURIComponent(survey.slug) +
+        '" class="inline-flex h-10 items-center gap-2 rounded-lg border border-themed px-4 text-sm font-medium text-body transition hover:bg-gray-50 dark:hover:bg-gray-800">' +
+        icon('eye', { size: 16 }) + t('builder.openPublic') + '</a>' +
+        '<a href="app-respostas.html?id=' + survey.id +
+        '" class="inline-flex h-10 items-center gap-2 rounded-lg border border-themed px-4 text-sm font-medium text-body transition hover:bg-gray-50 dark:hover:bg-gray-800">' +
+        icon('chart', { size: 16 }) + t('forms.results') + '</a>' +
+        (survey.status === 'publicado'
+          ? '<button type="button" data-close-survey class="inline-flex h-10 items-center gap-2 rounded-lg border border-themed px-4 text-sm font-medium text-body transition hover:bg-gray-50 dark:hover:bg-gray-800">' +
+            icon('lock', { size: 16 }) + t('forms.close') + '</button>'
+          : '<button type="button" data-publish-survey class="inline-flex h-10 items-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white transition hover:bg-brand-600">' +
+            icon('rocket', { size: 16 }) + t('forms.publish') + '</button>') +
+        '</div>';
+
+      const header =
+        '<div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div class="min-w-0">' +
+        '<div class="mb-2">' + UI.breadcrumb([
+          { label: t('appNav.forms'), href: 'app-formularios.html', icon: 'clipboard-list' },
+          { label: survey.title },
+        ]) + '</div>' +
+        '<h1 data-builder-title class="text-2xl font-bold break-words text-heading">' + esc(survey.title) + '</h1>' +
+        '<p class="mt-1 text-sm text-muted">' + t('builder.subtitle') + '</p></div>' +
+        '<div class="shrink-0">' + action + '</div></div>';
+
+      page.innerHTML =
+        header +
+        '<p class="mb-5 flex items-center gap-2 text-xs text-muted">' +
+        icon('check-circle', { size: 14, className: 'text-success-500' }) + t('builder.autosave') + '</p>' +
+        UI.tabs(
+          [
+            { label: t('builder.tabs.questions'), icon: 'list', content: '' },
+            { label: t('builder.tabs.logic'), icon: 'git-branch', content: '' },
+            { label: t('builder.tabs.appearance'), icon: 'palette', content: '' },
+            { label: t('builder.tabs.share'), icon: 'share', content: '' },
+          ],
+          tab
+        );
+
+      const close = page.querySelector('[data-close-survey]');
+      if (close) close.addEventListener('click', () => {
+        SV.closeSurvey(survey.id);
+        UI.notify(t('forms.closed'), 'success');
+        window.renderPage();
+      });
+      const publish = page.querySelector('[data-publish-survey]');
+      if (publish) publish.addEventListener('click', () => {
+        SV.publishSurvey(survey.id);
+        UI.notify(t('forms.published'), 'success');
+        window.renderPage();
+      });
+
+      renderTab();
+    };
+  </script>
+  <script src="assets/js/layout.js"></script>
+</body>
+</html>

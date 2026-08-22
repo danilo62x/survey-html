@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Resposta enviada — Sondagem</title>
+  <link rel="stylesheet" href="assets/css/tailwind.css" />
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/format.js"></script>
+  <script src="assets/js/query.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/sv.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/i18n.js"></script>
+</head>
+<body data-shell="public">
+  <div id="app"><div id="page"></div></div>
+
+  <script>
+    // Porta a ThankYouPage do React: mensagem configurada + resumo do que foi
+    // respondido (só as perguntas que a lógica deixou no caminho).
+    const slug = new URLSearchParams(window.location.search).get('slug') || '';
+
+    window.renderPage = function () {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      const survey = Query.surveyBySlug(SV.get().surveys, slug);
+      const filling = SVFilling.get();
+
+      document.title = t('thanks.title') + ' · ' + t('brand') + ' — Pesquisas & Formulários';
+
+      const answered = survey && filling.slug === survey.slug ? filling.submittedAnswers : {};
+      const rows = survey ? Query.ordered(survey.questions).filter((q) => answered[q.id] !== undefined) : [];
+
+      const card =
+        '<div class="surface-card rounded-3xl border p-6 text-center shadow-theme-lg sm:p-10">' +
+        '<span class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-success-50 text-success-600 dark:bg-success-500/15">' +
+        icon('check-circle', { size: 32 }) + '</span>' +
+        '<h1 class="mt-6 text-title-sm font-bold text-heading">' + t('thanks.title') + '</h1>' +
+        '<p class="mx-auto mt-3 max-w-xl text-sm text-muted sm:text-base">' +
+        esc(survey ? survey.thankYou : t('thanks.generic')) + '</p>' +
+        '<div class="mt-8 flex flex-col justify-center gap-3 sm:flex-row">' +
+        '<button type="button" data-again class="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-brand-500 px-5 text-sm font-medium text-white transition hover:bg-brand-600">' +
+        icon('refresh-cw', { size: 16 }) + t('thanks.again') + '</button>' +
+        '<a href="index.html" class="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-themed px-5 text-sm font-medium text-body transition hover:bg-gray-50 dark:hover:bg-gray-800">' +
+        icon('globe', { size: 16 }) + t('thanks.home') + '</a></div></div>';
+
+      const summary = rows.length
+        ? '<section class="surface-card mt-6 rounded-3xl border p-6 sm:p-8">' +
+          '<h2 class="text-base font-semibold text-heading">' + t('thanks.summary') + '</h2>' +
+          '<p class="mt-1 text-sm text-muted">' + t('thanks.summaryDesc') + '</p>' +
+          '<dl class="mt-6 flex flex-col gap-4">' +
+          rows.map((question, index) =>
+            '<div class="min-w-0 border-b border-themed pb-4 last:border-0 last:pb-0">' +
+            '<dt class="text-sm font-medium break-words text-heading">' + (index + 1) + '. ' + esc(question.title) + '</dt>' +
+            '<dd class="mt-1 text-sm break-words text-muted">' + esc(Query.answerToText(answered[question.id])) + '</dd></div>'
+          ).join('') +
+          '</dl></section>'
+        : '';
+
+      const page = document.getElementById('page');
+      page.innerHTML = '<div class="mx-auto w-full max-w-3xl px-4 py-12 sm:px-6 lg:py-20">' + card + summary + '</div>';
+
+      page.querySelector('[data-again]').addEventListener('click', () => {
+        SVFilling.restart();
+        window.location.href = 'formulario.html?slug=' + encodeURIComponent(slug);
+      });
+    };
+  </script>
+  <script src="assets/js/layout.js"></script>
+</body>
+</html>

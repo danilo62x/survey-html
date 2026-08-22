@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <title>Modelos — Sondagem</title>
+  <link rel="stylesheet" href="assets/css/tailwind.css" />
+  <script src="assets/js/state.js"></script>
+  <script src="assets/js/auth.js"></script>
+  <script src="assets/js/format.js"></script>
+  <script src="assets/js/query.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/sv.js"></script>
+  <script src="assets/js/icons.js"></script>
+  <script src="assets/js/i18n.js"></script>
+</head>
+<body data-shell="app">
+  <div id="app"><div id="page"></div></div>
+
+  <script>
+    // Porta a TemplatesLibraryPage do React: usar um modelo cria um formulário
+    // novo com as perguntas já dentro.
+    let term = '';
+    let previewId = null;
+
+    function useTemplate(template) {
+      const created = SV.createFromTemplate(template.id);
+      if (created) {
+        UI.notify(UI.t('templates.created', { name: template.name }), 'success');
+        window.location.href = 'app-construtor.html?id=' + created.id;
+      }
+    }
+
+    window.renderPage = function () {
+      const t = UI.t, icon = UI.icon, esc = UI.esc;
+      const templates = SV.get().templates;
+
+      document.title = t('templates.libraryTitle') + ' · ' + t('brand') + ' — Pesquisas & Formulários';
+
+      const needle = term.trim().toLowerCase();
+      const filtered = templates.filter((tpl) => (tpl.name + ' ' + tpl.objective).toLowerCase().includes(needle));
+
+      const search =
+        '<div class="mb-6 max-w-md"><div class="relative">' +
+        '<span class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted">' + icon('search', { size: 16 }) + '</span>' +
+        '<input data-search value="' + esc(term) + '" placeholder="' + esc(t('templates.searchPlaceholder')) +
+        '" class="focus-ring surface-card w-full rounded-xl border py-2.5 pr-3 pl-9 text-sm text-body"/></div></div>';
+
+      const grid = filtered.length === 0
+        ? '<div class="surface-card rounded-2xl border">' +
+          UI.emptyState({
+            icon: 'layers',
+            title: t('templates.emptyTitle'),
+            description: t('templates.emptyDesc'),
+            action: '<button type="button" data-clear class="inline-flex h-10 items-center rounded-lg border border-themed px-4 text-sm font-medium text-body">' +
+              t('common.clearFilters') + '</button>',
+          }) +
+          '</div>'
+        : '<div class="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">' +
+          filtered.map((template) =>
+            '<div class="flex flex-col gap-2">' +
+            UI.templateCard(template, { actionLabel: t('templates.use'), action: 'data-use="' + template.id + '"' }) +
+            '<button type="button" data-preview="' + template.id + '" class="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-themed text-xs font-medium text-body transition hover:bg-gray-50 dark:hover:bg-gray-800">' +
+            icon('eye', { size: 14 }) + t('templates.preview') + '</button></div>'
+          ).join('') +
+          '</div>';
+
+      const modal = UI.modal('tpl-modal', {
+        size: 'xl',
+        footer:
+          '<button type="button" data-modal-close class="h-10 rounded-lg border border-themed px-4 text-sm font-medium text-body">' + t('common.close') + '</button>' +
+          '<button type="button" data-use-preview class="h-10 rounded-lg bg-brand-500 px-4 text-sm font-medium text-white transition hover:bg-brand-600">' +
+          t('templates.use') + '</button>',
+      });
+
+      const page = document.getElementById('page');
+      page.innerHTML =
+        UI.pageHeader({ title: t('templates.libraryTitle'), subtitle: t('templates.librarySubtitle') }) + search + grid + modal;
+
+      const input = page.querySelector('[data-search]');
+      if (input) {
+        input.addEventListener('input', () => {
+          term = input.value;
+          window.renderPage();
+          const again = document.querySelector('[data-search]');
+          again.focus();
+          again.setSelectionRange(again.value.length, again.value.length);
+        });
+      }
+      const clear = page.querySelector('[data-clear]');
+      if (clear) clear.addEventListener('click', () => { term = ''; window.renderPage(); });
+
+      page.querySelectorAll('[data-use]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          const found = templates.find((tpl) => tpl.id === Number(btn.getAttribute('data-use')));
+          if (found) useTemplate(found);
+        })
+      );
+
+      page.querySelectorAll('[data-preview]').forEach((btn) =>
+        btn.addEventListener('click', () => {
+          const found = templates.find((tpl) => tpl.id === Number(btn.getAttribute('data-preview')));
+          if (!found) return;
+          previewId = found.id;
+          const modalEl = document.getElementById('tpl-modal');
+          modalEl.querySelector('[data-modal-title]').textContent = found.name;
+          modalEl.querySelector('[data-modal-subtitle]').textContent = found.objective;
+          modalEl.querySelector('[data-modal-body]').innerHTML =
+            '<div class="flex flex-col gap-8">' +
+            Query.ordered(found.questions).map((question, index) =>
+              '<div class="min-w-0 border-b border-themed pb-6 last:border-0 last:pb-0">' +
+              '<p class="mb-2 text-xs text-muted">' + t('results.questionNumber', { index: index + 1 }) + ' · ' + t('questionTypes.' + question.type) + '</p>' +
+              UI.questionRenderer(question, undefined, { color: found.color, preview: true }) + '</div>'
+            ).join('') +
+            '</div>';
+          UI.openModal('tpl-modal');
+        })
+      );
+
+      page.querySelector('[data-use-preview]').addEventListener('click', () => {
+        const found = templates.find((tpl) => tpl.id === previewId);
+        UI.closeModal('tpl-modal');
+        if (found) useTemplate(found);
+      });
+    };
+  </script>
+  <script src="assets/js/layout.js"></script>
+</body>
+</html>
